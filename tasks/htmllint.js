@@ -61,7 +61,7 @@ module.exports = (grunt) => {
 		}
 
 		const plugins = options.plugins || [];
-		let fileCount = this.filesSrc.length;
+		let fileCount = 0;
 		const issues = [];
 
 		htmllint.use(plugins);
@@ -103,34 +103,28 @@ module.exports = (grunt) => {
 					issues.push(fileIssues);
 				}
 
-				if (--fileCount === 0) {
+				if (++fileCount === this.filesSrc.length) {
 					writeOutput();
 				}
 			});
 		});
 
 		function writeOutput() {
-			// console.log(JSON.stringify(issues, null, 2));
 			const resultCount = issues.reduce((a, b, index) => {
 				return index === 1 ?
 					a.errorCount + b.errorCount :
 					a + b.errorCount;
 			});
-			const fileCount = issues.length;
-
 			let filePlural = grunt.util.pluralize(fileCount, 'file/files');
 
 			if (resultCount > 0) {
-				const resultFormat = formatter(issues);
-
 				// Log linting output.
-				grunt.log.writeln(resultFormat);
+				grunt.log.writeln(formatter(issues));
 
 				// Handle exit.
-				if (resultCount > 0) {
-					filePlural = grunt.util.pluralize(fileCount, 'file/files');
-					grunt.fail.warn(`Linting errors in ${fileCount} ${filePlural}.`);
-				}
+				fileCount = issues.length;
+				filePlural = grunt.util.pluralize(fileCount, 'file/files');
+				grunt.fail.warn(`Linting errors in ${fileCount} ${filePlural}.`);
 			}
 
 			grunt.log.ok(`${fileCount} ${filePlural} lint free.`);
