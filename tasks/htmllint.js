@@ -41,16 +41,16 @@ module.exports = (grunt) => {
 
 		// Merge task-specific and/or target-specific options with these defaults.
 		let options = this.options({
-			//force: false,
+			force: false,
 			format: 'node_modules/eslint-formatter-pretty',
 			plugins: [],
 			htmllintrc: false
 		});
 
 		const formatter = getFormatter(options.format);
-		// const force = options.force;
+		const force = options.force;
 
-		// delete options.force;
+		delete options.force;
 
 		if (options.htmllintrc) {
 			const htmllintrcPath = (options.htmllintrc === true ?
@@ -124,10 +124,18 @@ module.exports = (grunt) => {
 				// Handle exit.
 				fileCount = issues.length;
 				filePlural = grunt.util.pluralize(fileCount, 'file/files');
-				grunt.fail.warn(`Linting errors in ${fileCount} ${filePlural}.`);
+
+				if (force) {
+					grunt.log.warn(`Linting errors in ${fileCount} ${filePlural}. (Force flag enabled)`);
+				}
+				else {
+					grunt.fail.warn(`Linting errors in ${fileCount} ${filePlural}.`);
+				}
+			}
+			else {
+				grunt.log.ok(`${fileCount} ${filePlural} lint free.`);
 			}
 
-			grunt.log.ok(`${fileCount} ${filePlural} lint free.`);
 			done();
 		}
 	});
