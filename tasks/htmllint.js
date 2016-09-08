@@ -1,116 +1,140 @@
 'use strict';
 
-var reportTemplate = [
-    '<%= filePath %>: (<%= issue.code %>), ',
-    'line <%= issue.line %>, col <%= issue.column %>, ',
-    '<%= issue.msg %>'
-].join('');
+const htmllint = require('htmllint');
+const path = require('path');
 
-module.exports = function (grunt) {
-    grunt.registerMultiTask('htmllint', 'HTML5 linter and validator.', function () {
-        var htmllint = require('htmllint'),
-            Promise = require('promise');
-        var done = this.async();
+function getFormatter(format) {
+	let formatterPath;
 
-        // Merge task-specific and/or target-specific options with these defaults.
-        var options = this.options({
-            force: false,
-            maxerr: Infinity,
-            plugins: [],
-            htmllintrc: false
-        });
+	// default is stylish
+	format = format || 'stylish';
 
-        var force = options.force;
-        delete options.force;
+	// only strings are valid formatters
+	if (typeof format === 'string') {
+		// replace \ with / for Windows compatibility
+		format = format.replace(/\\/g, '/');
 
-        if (options.htmllintrc) {
-	    var htmllintrcPath = (options.htmllintrc === true ? '.htmllintrc' : options.htmllintrc);
-            options = grunt.file.readJSON(htmllintrcPath);
+		// if there's a slash, then it's a file
+		if (format.indexOf('/') > -1) {
+			formatterPath = path.resolve(process.cwd(), format);
+		}
+		else {
+			formatterPath = `eslint/lib/formatters/${format}`;
+		}
 
-            if (!options.hasOwnProperty('maxerr')) {
-                options.maxerr = Infinity;
-            }
-        }
+		try {
+			return require(formatterPath);
+		}
+		catch (ex) {
+			ex.message = `There was a problem loading formatter: ${formatterPath}\nError: ${ex.message}`;
+			throw ex;
+		}
+	}
+	else {
+		return null;
+	}
+}
 
-        var plugins = options.plugins || [],
-            errorFiles = 0,
-            skippedFiles = 0,
-            errorAmount = 0;
+module.exports = (grunt) => {
+	grunt.registerMultiTask('htmllint', 'HTML5 linter and validator.', function () {
+		const done = this.async();
 
-        htmllint.use(plugins);
+		// Merge task-specific and/or target-specific options with these defaults.
+		let options = this.options({
+			//force: false,
+			format: 'node_modules/eslint-formatter-pretty',
+			plugins: [],
+			htmllintrc: false
+		});
 
-        delete options.plugins;
-        delete options.htmllintrc;
+		const formatter = getFormatter(options.format);
+		// const force = options.force;
 
-        var lastPromise = Promise.resolve(null);
-        this.filesSrc.forEach(function (filePath) {
-            if (!grunt.file.exists(filePath)) {
-                grunt.log.warn('Source file "' + filePath + '" not found.');
-                return;
-            }
+		// delete options.force;
 
-            lastPromise = lastPromise.then(function (task) {
-                if (options.maxerr <= 0) {
-                    // don't lint the file
-                    return false;
-                }
+		if (options.htmllintrc) {
+			const htmllintrcPath = (options.htmllintrc === true ?
+				'.htmllintrc' :
+				options.htmllintrc);
 
-                var fileSrc = grunt.file.read(filePath);
+			options = grunt.file.readJSON(htmllintrcPath);
+		}
 
-                return htmllint(fileSrc, options);
-            }).then(function (issues) {
-                if (issues === false) {
-                    // skipped the file
-                    skippedFiles++;
-                    grunt.log.verbose.warn('Skipped file "' + filePath + '" (maxerr).');
-                    return;
-                }
+		const plugins = options.plugins || [];
+		let fileCount = this.filesSrc.length;
+		const issues = [];
 
-                issues.forEach(function (issue) {
-                    var logMsg = grunt.template.process(reportTemplate, {
-                        data: {
-                            filePath: filePath,
-                            issue: {
-                                code: issue.code,
-                                line: issue.line,
-                                column: issue.column,
-                                msg: issue.msg || htmllint.messages.renderIssue(issue)
-                            }
-                        }
-                    });
-                    grunt.log.error(logMsg);
-                });
+		htmllint.use(plugins);
+		delete options.plugins;
+		delete options.htmllintrc;
 
-                if (issues.length <= 0) {
-                    grunt.log.verbose.ok(filePath + ' is lint free');
-                } else {
-                    errorFiles++;
-                }
+		this.filesSrc.forEach((filePath) => {
+			if (!grunt.file.exists(filePath)) {
+				grunt.log.warn(`Source file "${filePath}" not found.`);
 
-                errorAmount += issues.length;
-                options.maxerr -= issues.length;
-            });
-        });
+				return;
+			}
 
-        lastPromise
-            .then(function () {
+			const src = grunt.file.read(filePath);
+			const output = htmllint(src, options);
 
-                var resultMsg = [
-                    'encountered ', errorAmount, ' errors in total\n',
-                    errorFiles,
-                    ' file(s) had lint error out of ',
-                    this.filesSrc.length, ' file(s). ',
-                    '(skipped ', skippedFiles, ' files)'
-                ].join('');
+			output.then((results) => {
+				if (results.length > 0) {
+					const fileIssues = {
+						filePath: filePath,
+						warningCount: 0,
+						errorCount: 0,
+						messages: []
+					};
 
-                if (this.errorCount) {
-                    grunt.log.error(resultMsg);
-                } else {
-                    grunt.log.ok(resultMsg);
-                }
-            }.bind(this))
-            .done(function () {
-                done(this.errorCount === 0 || force);
-            }.bind(this));
-    });
+					results.map((result) => {
+						const message = {
+							ruleId: result.rule,
+							line: result.line,
+							column: result.column,
+							message: result.msg || htmllint.messages.renderIssue(result),
+							severity: 2
+						};
+
+						fileIssues.errorCount++;
+						fileIssues.messages.push(message);
+					});
+
+					issues.push(fileIssues);
+				}
+
+				if (--fileCount === 0) {
+					writeOutput();
+				}
+			});
+		});
+
+		function writeOutput() {
+			// console.log(JSON.stringify(issues, null, 2));
+			const resultCount = issues.reduce((a, b, index) => {
+				return index === 1 ?
+					a.errorCount + b.errorCount :
+					a + b.errorCount;
+			});
+			const fileCount = issues.length;
+
+			let filePlural = grunt.util.pluralize(fileCount, 'file/files');
+
+			if (resultCount > 0) {
+				const resultFormat = formatter(issues);
+
+				// Log linting output.
+				grunt.log.writeln(resultFormat);
+
+				// Handle exit.
+				if (resultCount > 0) {
+					filePlural = grunt.util.pluralize(fileCount, 'file/files');
+					grunt.fail.warn(`Linting errors in ${fileCount} ${filePlural}.`);
+				}
+			}
+
+			grunt.log.ok(`${fileCount} ${filePlural} lint free.`);
+			done();
+		}
+	});
 };
