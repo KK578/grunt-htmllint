@@ -111,10 +111,8 @@ module.exports = (grunt) => {
 
 		function writeOutput() {
 			const resultCount = issues.reduce((a, b, index) => {
-				return index === 1 ?
-					a.errorCount + b.errorCount :
-					a + b.errorCount;
-			});
+				return a + b.errorCount;
+			}, 0);
 			let filePlural = grunt.util.pluralize(fileCount, 'file/files');
 
 			if (resultCount > 0) {
